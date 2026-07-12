@@ -161,7 +161,7 @@ The repo pins several machine-specific values:
 | PCI address `0x00:c4:00.5` | Service/script | BIOS reorder, new hardware | `lspci -nn \| grep 'Audio Coprocessor'` |
 | SoundWire addresses `sdw:0:1:0102:0000:01:8` / `:b` | Service/script | Chip replacement | `ls /sys/bus/soundwire/devices/` |
 | Subsystem ID `1714` (firmware prefix) | Firmware naming | Different model | `lspci -s <acp-pci> -v \| grep Subsystem` |
-| Card longname `ASUSTeKCOMPUTERINC.-ProArtPX13HN7306EAC-1.0-HN7306EAC` | UCM override path | BIOS DMI update | `awk '/amd-soundwire/{getline; gsub(/ /,""); print}' /proc/asound/cards` |
+| Card longname `ASUSTeKCOMPUTERINC.-ProArtPX13HN7306EA-1.0-HN7306EA` or `ASUSTeKCOMPUTERINC.-ProArtPX13HN7306EAC-1.0-HN7306EAC` | UCM override path | BIOS DMI update or different PX13 SKU | `awk '/amd-soundwire/{getline; gsub(/ /,""); print}' /proc/asound/cards` |
 | PCM device numbers `hw:X,2` (speaker) / `hw:X,4` (DMIC) | UCM configs | Kernel driver reorder | `aplay -l` / `arecord -l` |
 
 For different laptop SKUs: extract values from a running system, search the scripts/configs for hardcoded values, update every occurrence.
@@ -178,4 +178,4 @@ For different laptop SKUs: extract values from a running system, search the scri
 
 ## Community Tracking
 
-All ongoing work tracked in [CachyOS/linux-cachyos#737](https://github.com/CachyOS/linux-cachyos/issues/737) (107+ comments, all major findings reviewed).
+All ongoing work tracked in [CachyOS/linux-cachyos#737](https://github.com/CachyOS/linux-cachyos/issues/737)

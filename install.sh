@@ -24,6 +24,10 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KVER="$(uname -r)"
 KMAJ="${KVER%%.*}"
 KMIN="${KVER#*.}"; KMIN="${KMIN%%.*}"
+DEFAULT_LONGS=(
+  "ASUSTeKCOMPUTERINC.-ProArtPX13HN7306EA-1.0-HN7306EA"
+  "ASUSTeKCOMPUTERINC.-ProArtPX13HN7306EAC-1.0-HN7306EAC"
+)
 
 # Preflight
 hdr "PX13 Audio Fix — kernel $KVER"
@@ -39,7 +43,7 @@ sudo -v || err "Need sudo"
 install_firmware() {
   hdr "Installing firmware blobs"
 
-  local F8="$REPO/1714-1-8.bin" FB="$REPO/1714-1-B.bin"
+  local F8="$REPO/firmware/1714-1-8.bin" FB="$REPO/firmware/1714-1-B.bin"
   [ -f "$F8" ] || err "Missing: $F8 (extract from ASUS Windows driver)"
   [ -f "$FB" ] || err "Missing: $FB (extract from ASUS Windows driver)"
 
@@ -102,11 +106,11 @@ install_all() {
   local LONG
   LONG="$(awk '/amd-soundwire/{getline; gsub(/^ +| +$/,""); gsub(/ /,""); print; exit}' /proc/asound/cards 2>/dev/null || echo '')"
 
-  # If card not enumerated yet, use a default (will be re-derived after first boot)
+  # If card not enumerated yet, install the known PX13 longname fallbacks.
   if [ -z "$LONG" ]; then
-    LONG="ASUSTeKCOMPUTERINC.-ProArtPX13HN7306EAC-1.0-HN7306EAC"
-    warn "Card not enumerated yet; using default longname"
-    warn "Re-run this script after first boot to derive the exact name"
+    LONG="${DEFAULT_LONGS[0]}"
+    warn "Card not enumerated yet; installing fallback longname overrides"
+    warn "Boot-time HiFi activator will retry once the card appears"
   fi
 
   # Speaker device config (PCM hw:X,2)
@@ -127,18 +131,39 @@ install_all() {
     "$UCM/codecs/tas2783/init.conf"
   ok "codecs/tas2783/init.conf"
 
-  # Longname override: forces speaker/mic codec selection
-  # (Unowned path => survives alsa-ucm-conf updates)
-  { cat "$UCM/conf.d/amd-soundwire/amd-soundwire.conf" 2>/dev/null || echo ""
-    echo ""
-    echo "Define.SpeakerCodec1 \"tas2783\""
-    echo "Define.MicCodec1 \"acp-dmic\""
-  } | sudo tee "$UCM/conf.d/amd-soundwire/$LONG.conf" >/dev/null
+  # Longname override: forces speaker codec selection with the tested syntax.
+  # Install both the detected longname and the known PX13 fallback so cold boots
+  # do not depend on re-running the installer after the card enumerates.
+  sudo install -Dm0644 "$REPO/configs/px13-longname-override.conf" \
+    "$UCM/conf.d/amd-soundwire/$LONG.conf"
   ok "conf.d/amd-soundwire/$LONG.conf (override, survives updates)"
+
+  for fallback_long in "${DEFAULT_LONGS[@]}"; do
+    [ "$fallback_long" = "$LONG" ] && continue
+    sudo install -Dm0644 "$REPO/configs/px13-longname-override.conf" \
+      "$UCM/conf.d/amd-soundwire/$fallback_long.conf"
+    ok "conf.d/amd-soundwire/$fallback_long.conf (fallback override)"
+  done
 
   hdr "Installing suspend/resume recovery hook"
   sudo install -m0755 "$REPO/50-px13-soundwire" /usr/lib/systemd/system-sleep/
   ok "systemd-sleep hook installed"
+
+  hdr "Installing HiFi profile activator"
+  sudo install -Dm0755 "$REPO/px13-set-hifi-profile" /usr/local/libexec/px13-set-hifi-profile
+  sudo install -Dm0644 "$REPO/px13-set-hifi-profile.service" /etc/systemd/user/px13-set-hifi-profile.service
+  if systemctl --global enable px13-set-hifi-profile.service >/dev/null 2>&1; then
+    ok "Global user service enabled"
+  else
+    warn "Could not enable global user service; enabling for current user only"
+  fi
+
+  systemctl --user daemon-reload 2>/dev/null || true
+  if systemctl --user enable --now px13-set-hifi-profile.service >/dev/null 2>&1; then
+    ok "HiFi profile activator started for current user"
+  else
+    warn "Could not start HiFi activator for current user"
+  fi
 
   hdr "Activating module and restarting audio"
   # Stop audio services to allow module reload
@@ -155,14 +180,20 @@ install_all() {
     fi
   fi
 
-  # Restart PipeWire
-  systemctl --user restart wireplumber pipewire pipewire-pulse
-  sleep 3
+  # Force one full SoundWire reprobe so PipeWire rebuilds the card profiles
+  # against the newly installed UCM data instead of keeping stale pro-audio
+  # state until the next suspend/resume or reboot.
+  if sudo /usr/lib/systemd/system-sleep/50-px13-soundwire post suspend; then
+    ok "SoundWire card reprobed and audio services refreshed"
+  else
+    warn "SoundWire reprobe failed; falling back to PipeWire restart"
+    systemctl --user restart wireplumber pipewire pipewire-pulse
+    sleep 3
 
-  # Try to switch to HiFi profile
-  local PCARD="alsa_card.pci-0000_c4_00.5-platform-amd_sdw"
-  pactl set-card-profile "$PCARD" HiFi 2>/dev/null || \
-    warn "Could not switch to HiFi (card may not be ready yet)"
+    # Try to switch to HiFi now as well; the user service will retry on boot/login.
+    /usr/local/libexec/px13-set-hifi-profile || \
+      warn "Could not switch to HiFi yet (card may not be ready yet)"
+  fi
 
   ok "Audio system restarted"
 

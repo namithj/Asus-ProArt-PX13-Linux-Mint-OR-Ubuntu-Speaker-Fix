@@ -16,13 +16,14 @@ Additionally:
 
 ---
 
-## The Fix (3 components)
+## The Fix (4 components)
 
 | Component | Problem Solved | How |
 |-----------|---|---|
 | **DKMS Module** | Both amps at same cluster index | Adds `Channel Playback` control (Left/Right per amp) + rebases nealstar's patch onto stock 7.1 driver |
 | **UCM Profiles** | No Speaker device in HiFi profile | Defines tas2783 Speaker device + overrides to force codec selection |
 | **Suspend Hook** | Audio dead after sleep | PCI remove+rescan of ACP device (only method that fully re-attaches peripherals) |
+| **HiFi Activator** | Card defaults to stereo / wrong profile after boot | User service retries `pactl set-card-profile ... HiFi` after PipeWire starts |
 
 ---
 
@@ -39,7 +40,7 @@ git clone https://github.com/ftoleedo/px13-audio-fix.git && cd px13-audio-fix
 # Or just: ./install.sh firmware  # firmware only
 ```
 
-**Then**: reboot (or module reload may work), test audio.
+**Then**: reboot, log back in, and test audio. The installer also does one live SoundWire reprobe so PipeWire rebuilds the card against the new UCM data, and it enables a user service that re-selects `HiFi` after PipeWire starts.
 
 ---
 
@@ -50,9 +51,13 @@ git clone https://github.com/ftoleedo/px13-audio-fix.git && cd px13-audio-fix
 | `/usr/src/snd-soc-tas2783-sdw-px13-1.0/` | DKMS kernel module | Auto-rebuilds on kernel updates |
 | `/usr/share/alsa/ucm2/sof-soundwire/tas2783.conf` | Speaker device for HiFi profile | Sets Left/Right channels per amp |
 | `/usr/share/alsa/ucm2/sof-soundwire/acp-dmic.conf` | Built-in DMIC capture device | |
-| `/usr/share/alsa/ucm2/conf.d/amd-soundwire/<longname>.conf` | Codec override (unowned by packages) | Survives alsa-ucm-conf updates |
+| `/usr/share/alsa/ucm2/conf.d/amd-soundwire/<longname>.conf` | Codec override (unowned by packages) | Installed for the detected card longname |
+| `/usr/share/alsa/ucm2/conf.d/amd-soundwire/ASUSTeKCOMPUTERINC.-ProArtPX13HN7306EA-1.0-HN7306EA.conf` | Fallback codec override | Covers PX13 EA cold boots before exact longname detection succeeds |
+| `/usr/share/alsa/ucm2/conf.d/amd-soundwire/ASUSTeKCOMPUTERINC.-ProArtPX13HN7306EAC-1.0-HN7306EAC.conf` | Fallback codec override | Covers PX13 EAC cold boots before exact longname detection succeeds |
 | `/lib/firmware/ti/audio/tas2783/1714-1-*.bin` | TAS2783 calibration firmware | Symlinked from top-level for driver |
 | `/usr/lib/systemd/system-sleep/50-px13-soundwire` | Post-resume recovery hook | PCI reset for full re-initialization |
+| `/usr/local/libexec/px13-set-hifi-profile` | HiFi profile helper | Retries until the AMD SoundWire card is ready |
+| `/etc/systemd/user/px13-set-hifi-profile.service` | Login-time HiFi selection | Enabled globally and started for the current user |
 
 ---
 
@@ -67,7 +72,7 @@ If not (e.g., Ubuntu 26.04 with linux-firmware 20260319):
   - 7z x the .exe or run it on Windows, find `TI Smart Amplifier Driver` installer
   - Locate `Firmwares\1714-1-0x8.bin` and `1714-1-0xB.bin`
   - Rename to `1714-1-8.bin` and `1714-1-B.bin` (drop the `0x`)
-  - Place in repo root next to `install.sh`
+  - Place them in the repo's `firmware/` directory
   - Run `./install.sh firmware`
 
 **SHA-256 (ASUS V6.3.1.15):**
@@ -94,6 +99,9 @@ amixer -D hw:1 cget name='tas2783-2 Channel Playback'
 # Active profile is HiFi with 2 sinks?
 pactl list cards | grep -A5 'Active Profile'
 #  -> should show: HiFi (with "sinks: 2")
+
+# HiFi activator installed and enabled?
+systemctl --user status px13-set-hifi-profile.service
 
 # Stereo test (voice L/R from correct side)
 speaker-test -D pulse -c2 -l1 -t wav
@@ -125,8 +133,9 @@ Logs written to `/var/log/px13-soundwire-resume.log`.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| "Dummy Output" / no Speaker | UCM not loaded; longname override missing | Run install again; check `pactl list cards` for exact longname |
+| "Dummy Output" / no Speaker after boot | UCM override missing or profile never switched back to HiFi | Re-run `./install.sh`, then check `systemctl --user status px13-set-hifi-profile.service` |
 | Mono / one speaker | Stock module loaded instead of DKMS | Check `modinfo -k $(uname -r) snd_soc_tas2783_sdw` — must show `updates/` path |
+| Card shows up as stereo/default profile | `HiFi` is missing for the card longname, or PipeWire picked the default profile before the card was ready | Check `cat /proc/asound/cards` and confirm the matching override exists under `/usr/share/alsa/ucm2/conf.d/amd-soundwire/`, then run `systemctl --user start px13-set-hifi-profile.service` |
 | "Invalid argument" or profile stuck | PipeWire state corrupted | `pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw HiFi` |
 | Kernel update breaks sound | DKMS failed to rebuild | Manually: `cd /usr/src/snd-soc-tas2783-sdw-px13-1.0 && sudo make install KVER=$(uname -r)` |
 | Suspend hook won't run | systemd-sleep hook not installed or wrong permissions | `ls -l /usr/lib/systemd/system-sleep/50-px13-soundwire` (must be `-rwxr-xr-x`) |
@@ -145,9 +154,17 @@ sudo rm /usr/share/alsa/ucm2/sof-soundwire/tas2783.conf
 sudo rm /usr/share/alsa/ucm2/sof-soundwire/acp-dmic.conf
 LONG="$(awk '/amd-soundwire/{getline; gsub(/ /,""); print; exit}' /proc/asound/cards)"
 sudo rm "/usr/share/alsa/ucm2/conf.d/amd-soundwire/$LONG.conf"
+sudo rm "/usr/share/alsa/ucm2/conf.d/amd-soundwire/ASUSTeKCOMPUTERINC.-ProArtPX13HN7306EA-1.0-HN7306EA.conf"
+sudo rm "/usr/share/alsa/ucm2/conf.d/amd-soundwire/ASUSTeKCOMPUTERINC.-ProArtPX13HN7306EAC-1.0-HN7306EAC.conf"
 
 # Hook
 sudo rm /usr/lib/systemd/system-sleep/50-px13-soundwire
+
+# HiFi activator
+systemctl --user disable --now px13-set-hifi-profile.service 2>/dev/null || true
+sudo systemctl --global disable px13-set-hifi-profile.service 2>/dev/null || true
+sudo rm /etc/systemd/user/px13-set-hifi-profile.service
+sudo rm /usr/local/libexec/px13-set-hifi-profile
 
 # Firmware (optional; can leave for other distros)
 sudo rm /lib/firmware/1714-1-*.bin /lib/firmware/FFFF-1-*.bin

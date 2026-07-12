@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+CARD="alsa_card.pci-0000_c4_00.5-platform-amd_sdw"
+
+active_profile() {
+  pactl list cards 2>/dev/null | awk -v card="$CARD" '
+    $1 == "Name:" && $2 == card { seen=1; next }
+    seen && $1 == "Active" && $2 == "Profile:" { print $3; exit }
+    seen && $1 == "Name:" { exit }
+  '
+}
+
+for _ in $(seq 1 30); do
+  if pactl set-card-profile "$CARD" HiFi 2>/dev/null; then
+    [ "$(active_profile)" = "HiFi" ] && exit 0
+  fi
+  sleep 1
+done
+
+echo "px13-set-hifi-profile: failed to activate HiFi for $CARD" >&2
+exit 1

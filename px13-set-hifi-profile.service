@@ -1,0 +1,11 @@
+[Unit]
+Description=Force HiFi profile for ASUS ProArt PX13 speakers
+After=pipewire.service pipewire-pulse.service wireplumber.service
+Wants=pipewire.service pipewire-pulse.service wireplumber.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/px13-set-hifi-profile
+
+[Install]
+WantedBy=default.target

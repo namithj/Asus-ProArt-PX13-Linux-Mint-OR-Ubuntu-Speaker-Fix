@@ -101,6 +101,10 @@ for uid in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $1}'); do
   sudo -u "$user" XDG_RUNTIME_DIR="$rt" systemctl --user \
     restart wireplumber pipewire pipewire-pulse 2>>"$LOG" || \
     log "uid $uid: PipeWire restart failed"
+
+  sudo -u "$user" XDG_RUNTIME_DIR="$rt" \
+    /usr/local/libexec/px13-set-hifi-profile 2>>"$LOG" || \
+    log "uid $uid: HiFi profile activation failed"
 done
 
 log "=== recovery complete ==="
