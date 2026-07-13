@@ -148,6 +148,14 @@ install_all() {
   hdr "Installing suspend/resume recovery hook"
   sudo install -m0755 "$REPO/50-px13-soundwire" /usr/lib/systemd/system-sleep/
   ok "systemd-sleep hook installed"
+  hdr "Installing boot-time SoundWire initialization"
+  sudo install -Dm0755 "$REPO/50-px13-soundwire-boot.sh" /usr/lib/systemd/scripts/50-px13-soundwire-boot.sh
+  sudo install -Dm0644 "$REPO/50-px13-soundwire-boot.service" /etc/systemd/system/50-px13-soundwire-boot.service
+  if systemctl enable --now 50-px13-soundwire-boot.service >/dev/null 2>&1; then
+    ok "Boot-time initialization service enabled"
+  else
+    warn "Could not enable boot-time service (will run on next reboot)"
+  fi
 
   hdr "Installing HiFi profile activator"
   sudo install -Dm0755 "$REPO/px13-set-hifi-profile" /usr/local/libexec/px13-set-hifi-profile

@@ -1,0 +1,16 @@
+[Unit]
+Description=ASUS ProArt PX13 SoundWire boot initialization
+Documentation=file:///usr/share/doc/px13-audio-fix/README.md
+After=systemd-modules-load.service local-fs.target sound.target
+Requires=sound.target
+ConditionPathExists=/sys/bus/soundwire/devices/sdw:0:1:*/status
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/systemd/scripts/50-px13-soundwire-boot.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=sysinit.target

@@ -56,6 +56,8 @@ git clone https://github.com/ftoleedo/px13-audio-fix.git && cd px13-audio-fix
 | `/usr/share/alsa/ucm2/conf.d/amd-soundwire/ASUSTeKCOMPUTERINC.-ProArtPX13HN7306EAC-1.0-HN7306EAC.conf` | Fallback codec override | Covers PX13 EAC cold boots before exact longname detection succeeds |
 | `/lib/firmware/ti/audio/tas2783/1714-1-*.bin` | TAS2783 calibration firmware | Symlinked from top-level for driver |
 | `/usr/lib/systemd/system-sleep/50-px13-soundwire` | Post-resume recovery hook | PCI reset for full re-initialization |
+| `/usr/lib/systemd/scripts/50-px13-soundwire-boot.sh` | Boot-time SoundWire init script | Runs PCI cycle on cold boot if peripherals not attached |
+| `/etc/systemd/system/50-px13-soundwire-boot.service` | Boot-time initialization service | Enabled at sysinit.target; runs before user sessions |
 | `/usr/local/libexec/px13-set-hifi-profile` | HiFi profile helper | Retries until the AMD SoundWire card is ready |
 | `/etc/systemd/user/px13-set-hifi-profile.service` | Login-time HiFi selection | Enabled globally and started for the current user |
 
@@ -133,7 +135,7 @@ Logs written to `/var/log/px13-soundwire-resume.log`.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| "Dummy Output" / no Speaker after boot | UCM override missing or profile never switched back to HiFi | Re-run `./install.sh`, then check `systemctl --user status px13-set-hifi-profile.service` |
+| "Dummy Output" / no Speaker after boot | SoundWire peripherals not attached on cold boot (now auto-recovered) | Check `journalctl -u 50-px13-soundwire-boot.service` for recovery logs; if still failing, run `sudo systemctl restart 50-px13-soundwire-boot.service` manually |
 | Mono / one speaker | Stock module loaded instead of DKMS | Check `modinfo -k $(uname -r) snd_soc_tas2783_sdw` — must show `updates/` path |
 | Card shows up as stereo/default profile | `HiFi` is missing for the card longname, or PipeWire picked the default profile before the card was ready | Check `cat /proc/asound/cards` and confirm the matching override exists under `/usr/share/alsa/ucm2/conf.d/amd-soundwire/`, then run `systemctl --user start px13-set-hifi-profile.service` |
 | "Invalid argument" or profile stuck | PipeWire state corrupted | `pactl set-card-profile alsa_card.pci-0000_c4_00.5-platform-amd_sdw HiFi` |
@@ -159,6 +161,10 @@ sudo rm "/usr/share/alsa/ucm2/conf.d/amd-soundwire/ASUSTeKCOMPUTERINC.-ProArtPX1
 
 # Hook
 sudo rm /usr/lib/systemd/system-sleep/50-px13-soundwire
+# Boot-time initialization (if installed)
+sudo systemctl disable --now 50-px13-soundwire-boot.service 2>/dev/null || true
+sudo rm /etc/systemd/system/50-px13-soundwire-boot.service
+sudo rm /usr/lib/systemd/scripts/50-px13-soundwire-boot.sh
 
 # HiFi activator
 systemctl --user disable --now px13-set-hifi-profile.service 2>/dev/null || true
